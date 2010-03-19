@@ -16,55 +16,180 @@ namespace Lyrics
 {
 	public partial class MainForm : Form
 	{
-		private Dictionary<string, List<TrackInformation>> artistsSongs = new Dictionary<string, List<TrackInformation>>();
+		private Dictionary<string, List<Track>> artistsTracks = new Dictionary<string, List<Track>>();
 		private string BaseUrlFormat = "http://letras.terra.com.br/{0}";
-		private iTunesApp itunes;
+		private iTunesApp itunes = new iTunesAppClass();
+		private int processedArtists;
 
 		public MainForm()
 		{
 			InitializeComponent();
+			grid.AutoGenerateColumns = false;
 		}
 
 		private void listITunesSongsButton_Click(object sender, EventArgs e)
 		{
-			artistsListBox.Items.Clear();
+			ListSongsFromITunes();
+		}
 
-			itunes = new iTunesAppClass();
-			IITTrackCollection selectedTracks = itunes.SelectedTracks;
+		private void ListSongsFromITunes()
+		{
+			List<Track> tracks = new List<Track>();
 
-			if (selectedTracks == null)
+			foreach (IITFileOrCDTrack currentTrack in itunes.LibraryPlaylist.Tracks)
 			{
-				return;
+				if (!String.IsNullOrEmpty(currentTrack.Location)
+					&& (!showOnlyMissingLyrics.Checked || String.IsNullOrEmpty(currentTrack.Lyrics)))
+				{
+					tracks.Add(new Track(currentTrack));
+				}
 			}
 
-			OrganizeArtists(selectedTracks);
-			foreach (string artist in artistsSongs.Keys)
+			grid.DataSource = tracks;
+		}
+
+		private void showOnlyMissingLyrics_CheckedChanged(object sender, EventArgs e)
+		{
+			ListSongsFromITunes();
+		}
+
+		private void grid_SelectionChanged(object sender, EventArgs e)
+		{
+			if (grid.SelectedRows.Count == 1)
 			{
-				artistsListBox.Items.Add(artist);
+				Track track = SelectedTrack;
+
+				string url = String.IsNullOrEmpty(track.CustomArtistUrl)
+					? String.Format(BaseUrlFormat, NormalizeName(track.Artist))
+					: track.CustomArtistUrl;
+
+				artistUrl.Text = url;
 			}
 		}
 
-		private void OrganizeArtists(IITTrackCollection selectedTracks)
+		private string NormalizeName(string name)
 		{
-			artistsSongs = new Dictionary<string, List<TrackInformation>>();
-			List<string> songs = new List<string>();
+			byte[] b = Encoding.GetEncoding(1251).GetBytes(name);
+			name = Encoding.ASCII.GetString(b).ToLower();
+			name = name.Replace(' ', '-')
+				.Replace("'", "")
+				.Replace('&', 'e')
+				.Replace('/', '-');
+			return name;
+		}
 
-			for (int i = 1; i <= selectedTracks.Count; i++)
+		private Track SelectedTrack
+		{
+			get { return (Track)grid.SelectedRows[0].DataBoundItem; }
+		}
+
+		private void artistUrl_Leave(object sender, EventArgs e)
+		{
+			if (grid.SelectedRows.Count == 1)
 			{
-				IITFileOrCDTrack currentTrack = (IITFileOrCDTrack)selectedTracks[i];
+				Track track = SelectedTrack;
+				track.CustomArtistUrl = artistUrl.Text;
 
-				if (!artistsSongs.ContainsKey(currentTrack.Artist))
+				foreach (DataGridViewRow row in grid.Rows)
 				{
-					artistsSongs.Add(currentTrack.Artist, new List<TrackInformation>());
+					Track currentTrack = (Track)row.DataBoundItem;
+
+					if (track != currentTrack && track.Artist == currentTrack.Artist)
+					{
+						currentTrack.CustomArtistUrl = track.CustomArtistUrl;
+					}
+				}
+			}
+		}
+
+		private void searchLyricsButton_Click(object sender, EventArgs e)
+		{
+			OrganizeTracks();
+			FetchLyrics();
+		}
+
+		private void FetchLyrics()
+		{
+			backgroundWorker = new BackgroundWorker();
+
+			backgroundWorker.DoWork += (sender, e) => {
+				foreach (string artist in artistsTracks.Keys)
+				{
+					UpdateStatus();
+					processedArtists++;
 				}
 
-				artistsSongs[currentTrack.Artist].Add(new TrackInformation() { 
-					Track = currentTrack,
-					Index = i
-				});
+				UpdateStatus();
+			};
+
+			backgroundWorker.RunWorkerAsync();
+		}
+
+		private void OrganizeTracks()
+		{
+			artistsTracks = new Dictionary<string, List<Track>>();
+
+			foreach (DataGridViewRow row in grid.Rows)
+			{
+				Track track = (Track)row.DataBoundItem;
+
+				if (!artistsTracks.ContainsKey(track.Artist))
+				{
+					artistsTracks.Add(track.Artist, new List<Track>());
+				}
+
+				artistsTracks[track.Artist].Add(track);
 			}
 		}
 
+		private void UpdateStatus()
+		{
+			if (statusLabel.InvokeRequired)
+			{
+				statusLabel.Invoke(new Action(UpdateStatus));
+			}
+			else
+			{
+				statusLabel.Text = String.Format("Processado {0}/{1} artistas", artistsTracks.Count, processedArtists);
+			}
+		}
+
+		private List<OnlineSongInformation> ListOnlineSongs(string artistName)
+		{
+			List<OnlineTrackInfo> songs = new List<OnlineTrackInfo>();
+			string result = GetUrlContents(String.Format(BaseUrlFormat, NormalizeName(artistName)));
+
+			if (result != null && result.Contains("identificador_artista"))
+			{
+				Match m = Regex.Match(result, "<a class=\"elemsug\" href=\"(.*)\">(.*)</a>");
+
+				while (m.Success)
+				{
+					songs.Add(new OnlineTrackInfo()
+					{
+						Path = m.Groups[1].Value,
+						Name = m.Groups[2].Value.ToLower()
+					});
+
+					m = m.NextMatch();
+				}
+			}
+
+			return songs;
+		}
+
+		private string GetUrlContents(string url)
+		{
+			HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
+			request.Method = "GET";
+			HttpWebResponse response = (HttpWebResponse)request.GetResponse();
+			StreamReader reader = new StreamReader(response.GetResponseStream(), Encoding.GetEncoding("ISO-8859-1"));
+			string result = reader.ReadToEnd();
+			reader.Close();
+			return result;
+		}
+
+		/*
 		private void searchLyricsButton_Click(object sender, EventArgs e)
 		{
 			if (artistsListBox.SelectedIndex > -1)
@@ -155,51 +280,6 @@ namespace Lyrics
 			return lyrics;
 		}
 
-		private List<OnlineSongInformation> ListOnlineSongs(string artistName)
-		{
-			List<OnlineSongInformation> songs = new List<OnlineSongInformation>();
-			string result = GetUrlContents(String.Format(BaseUrlFormat, NormalizeName(artistName)));
-
-			if (result != null && result.Contains("identificador_artista"))
-			{
-				Match m = Regex.Match(result, "<a class=\"elemsug\" href=\"(.*)\">(.*)</a>");
-
-				while (m.Success)
-				{
-					songs.Add(new OnlineSongInformation() {
-						Path = m.Groups[1].Value,
-						Name = m.Groups[2].Value.ToLower()
-					});
-
-					m = m.NextMatch();
-				}
-			}
-			
-			return songs;
-		}
-
-		private string GetUrlContents(string url)
-		{
-			HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
-			request.Method = "GET";
-			HttpWebResponse response = (HttpWebResponse)request.GetResponse();
-			StreamReader reader = new StreamReader(response.GetResponseStream(), Encoding.GetEncoding("ISO-8859-1"));
-			string result = reader.ReadToEnd();
-			reader.Close();
-			return result;
-		}
-
-		private string NormalizeName(string name)
-		{
-			byte[] b = Encoding.GetEncoding(1251).GetBytes(name);
-			name = Encoding.ASCII.GetString(b).ToLower();
-			name = name.Replace(' ', '-')
-				.Replace("'", "")
-				.Replace('&', 'e')
-				.Replace('/', '-');
-			return name;
-		}
-
 		private void artistsListBox_SelectedValueChanged(object sender, EventArgs e)
 		{
 			if (artistsListBox.SelectedIndex > -1)
@@ -212,23 +292,6 @@ namespace Lyrics
 					songsListBox.Items.Add(info.Track);
 				}
 			}
-		}
-	}
-
-	class TrackInformation
-	{
-		public IITFileOrCDTrack Track { get; set; }
-		public int Index { get; set; }
-
-		public override string ToString()
-		{
-			return Track.Name.ToLower();
-		}
-	}
-
-	class OnlineSongInformation
-	{
-		public string Name { get; set; }
-		public string Path { get; set; }
+		}*/
 	}
 }
