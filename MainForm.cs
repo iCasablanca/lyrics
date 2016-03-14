@@ -1,20 +1,16 @@
-﻿using System;
-using System.IO;
-using System.Net;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Data;
-using System.Drawing;
-using System.Linq;
-using System.Text;
-using System.Globalization;
-using System.Text.RegularExpressions;
-using System.Windows.Forms;
-using iTunesLib;
-
-namespace Lyrics
+﻿namespace Lyrics
 {
-	public partial class MainForm : Form
+    using iTunesLib;
+    using System;
+    using System.Collections.Generic;
+    using System.ComponentModel;
+    using System.IO;
+    using System.Net;
+    using System.Text;
+    using System.Text.RegularExpressions;
+    using System.Windows.Forms;
+
+    public partial class MainForm : Form
 	{
 		private Dictionary<string, List<Track>> artistsTracks = new Dictionary<string, List<Track>>();
 		private string BaseUrlFormat = "http://letras.terra.com.br/{0}";
@@ -69,12 +65,15 @@ namespace Lyrics
 
 		private string NormalizeName(string name)
 		{
-			byte[] b = Encoding.GetEncoding(1251).GetBytes(name);
-			name = Encoding.ASCII.GetString(b).ToLower();
-			name = name.Replace(' ', '-')
-				.Replace("'", "")
-				.Replace('&', 'e')
-				.Replace('/', '-');
+            if (string.IsNullOrEmpty(name) == false)
+            {
+                byte[] b = Encoding.GetEncoding(1251).GetBytes(name);
+                name = Encoding.ASCII.GetString(b).ToLower();
+                name = name.Replace(' ', '-')
+                    .Replace("'", "")
+                    .Replace('&', 'e')
+                    .Replace('/', '-');
+            }
 			return name;
 		}
 
@@ -133,12 +132,15 @@ namespace Lyrics
 			{
 				Track track = (Track)row.DataBoundItem;
 
-				if (!artistsTracks.ContainsKey(track.Artist))
-				{
-					artistsTracks.Add(track.Artist, new List<Track>());
-				}
+                if (string.IsNullOrEmpty(track.Artist) == false)
+                {
+                    if (!artistsTracks.ContainsKey(track.Artist))
+                    {
+                        artistsTracks.Add(track.Artist, new List<Track>());
+                    }
 
-				artistsTracks[track.Artist].Add(track);
+                    artistsTracks[track.Artist].Add(track);
+                }
 			}
 		}
 
@@ -154,7 +156,7 @@ namespace Lyrics
 			}
 		}
 
-		private List<OnlineSongInformation> ListOnlineSongs(string artistName)
+        private List<OnlineTrackInfo> ListOnlineSongs(string artistName)
 		{
 			List<OnlineTrackInfo> songs = new List<OnlineTrackInfo>();
 			string result = GetUrlContents(String.Format(BaseUrlFormat, NormalizeName(artistName)));
